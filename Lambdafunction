@@ -1,0 +1,12 @@
+import boto3
+
+ec2 = boto3.client('ec2')
+
+def lambda_handler(event, context):
+    response = ec2.describe_instances()
+    for Reservation in  response["Reservations"]:
+        for Instance in Reservation ["Instances"]:
+            id=[Instance["InstanceId"]]
+            if Instance ["State"]["Name"] == "stopped":
+                print (id)
+                ec2.terminate_instances(InstanceIds=id
