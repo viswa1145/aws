@@ -1,0 +1,236 @@
+fileConfigs:
+  01_sources.conf: |-
+    <source>
+      @type tail
+      @id in_tail_container_logs
+      @label @KUBERNETES
+      path /var/log/containers/*.log
+      pos_file /var/log/fluentd-containers.log.pos
+      read_lines_limit 100000
+      exclude_path ["/var/log/containers/fluent*.log"]
+      tag kubernetes.*
+      read_from_head true
+      <parse>
+        @type multi_format
+        <pattern>
+          format json
+          time_key time
+          time_format "%Y-%m-%dT%H:%M:%S.%NZ"
+          include_timestamp true
+          keep_time_key false
+        </pattern>
+        <pattern>
+          format regexp
+          expression /^(?<time>.+) (?<stream>stdout|stderr)( (?<logtag>.))? (?<log>.*)$/
+          time_format "%Y-%m-%dT%H:%M:%S.%NZ"
+          keep_time_key false
+        </pattern>
+      </parse>
+      emit_unmatched_lines true
+    </source>
+
+    <source>
+      @type prometheus
+      bind 0.0.0.0
+      port 24231
+      metrics_path /metrics
+    </source>
+
+    <source>
+      @type prometheus_output_monitor
+      interval 9
+      <labels>
+        hostname ${hostname}
+      </labels>
+    </source>
+
+  02_filters.conf: |-
+    <label @KUBERNETES>
+      <filter **>
+        @type grep
+        <exclude>
+          key log
+          pattern /^F\b/
+        </exclude>
+      </filter>
+
+      <filter kubernetes.**>
+        @type kubernetes_metadata
+        stats_interval 300
+        cache_ttl 30
+        @id filter_kube_metadata
+        skip_labels false
+        skip_container_metadata true
+        skip_namespace_metadata true
+        skip_master_url true
+      </filter>
+
+      # Custom parser for your nginx access logs
+      # Replace 'your-app-name' with the actual container name pattern
+      <filter kubernetes.var.log.containers.your-app-name**>
+        @type parser
+        key_name log
+        reserve_data true
+        emit_invalid_record_to_error false
+        <parse>
+          @type regexp
+          expression /^(?<remote_addr>[^ ]+) (?<remote_user>[^ ]+) (?<remote_user2>[^ ]+) \[(?<time_local>[^\]]+)\] "(?<method>[A-Z]+) (?<request_uri>[^ ]+) (?<http_version>[^"]+)" (?<status>\d+) (?<body_bytes_sent>\d+|-) "(?<http_referer>[^"]*)" "(?<http_user_agent>[^"]*)" "(?<http_x_forwarded_for>[^"]*)"$/
+          time_format %d/%b/%Y:%H:%M:%S %z
+          time_key time_local
+        </parse>
+      </filter>
+
+      <filter kubernetes.var.log.containers.blibli-gateway**>
+        @type parser
+        key_name log
+        reserve_data true
+        emit_invalid_record_to_error false
+        <parse>
+          @type nginx
+          expression /^(?<remote>[^ ]*) (?<host>[^ ]*) (?<user>[^ ]*) \[(?<time>[^\]]*)\] "(?<method>\S+)(?: +(?<path>[^\"]*?)(?: +\S*)?)?" (?<code>[^ ]*) (?<size>[^ ]*) "(?<duration>[^\"]*)"(?: "(?<referer>[^\"]*)" "(?<agent>[^\"]*)"(?:\s+(?<http_x_forwarded_for>[^ ]+))?)? "(?<real_ip>\S+)(?:, +(?<proxy_ip>[^\"]*?)(?:, +\S*)?)?" "(?<cf_ja3>[^\"]*)" "(?<cf_jsdetection>[^\"]*)" "(?<cf_bot_score>[^\"]*)" "(?<cf_bot_verified>[^\"]*)" "(?<cf_bot_verified_category>[^\"]*)" "(?<cf_ray_id>[^\"]*)" "(?<cf_thread_score>[^\"]*)" "(?<email_web>[^\"]*)" "(?<email_app>[^\"]*)" "(?<date>[^\"]*)" "(?<version>[^\"]*)"/
+          time_format %d/%b/%Y:%H:%M:%S %z
+        </parse>
+      </filter>
+
+      <filter kubernetes.var.log.containers.seller-gateway**>
+        @type parser
+        key_name log
+        reserve_data true
+        emit_invalid_record_to_error false
+        <parse>
+          @type nginx
+          expression /^(?<remote>[^ ]*) (?<host>[^ ]*) (?<user>[^ ]*) (?<test>[^ ]*) \[(?<time>[^\]]*)\] "(?<method>\S+)(?: +(?<path>[^\"]*?)(?: +\S*)?)?" (?<code>[^ ]*) (?<size>[^ ]*) "(?<referer>[^\"]*)" "(?<agent>[^\"]*)"(?:\s+(?<http_x_forwarded_for>[^ ]+))? (?<real_ip>\S+)(?:, +(?<proxy_ip>[^\"]*?) (?:, +\S*)?)?" "(?<cf_ja3>[^\"]*)" "(?<cf_jsdetection>[^\"]*)" "(?<cf_bot_score>[^\"]*)" "(?<cf_bot_verified>[^\"]*)" "(?<cf_bot_verified_category>[^\"]*)" "(?<cf_ray_id>[^\"]*)" "(?<cf_thread_score>[^\"]*)"/
+          time_format %d/%b/%Y:%H:%M:%S %z
+        </parse>
+      </filter>  
+
+      <filter kubernetes.var.log.containers.x-product**>
+        @type parser
+        key_name log
+        reserve_data true
+        emit_invalid_record_to_error false
+        <parse>
+          @type regexp
+          expression /ItemDataChange\{merchantCode='(?<merchantCode>[^']+)'[^{]+itemSku='(?<itemSku>[^']+)'[^{]+productSku='(?<productSku>[^']+)'[^{]+merchantSku='(?<merchantSku>[^']+)'[^{]+itemCode='(?<itemCode>[^']+)'[^{]+isSynchronized=(?<isSynchronized>[^,]+),[^{]+itemCatentryId='(?<itemCatentryId>[^']+)'/
+          time_format %d/%b/%Y:%H:%M:%S %z
+        </parse>
+      </filter>
+
+      <filter kubernetes.**>
+        @type grep
+        <exclude>
+          key $.kubernetes.labels.release
+          pattern /(^nginx-ingress-static-public)/
+        </exclude>
+      </filter>
+      <filter kubernetes.**>
+        @type grep
+        <exclude>
+          key $.kubernetes.labels.release
+          pattern /(^aggregate-platform-*)/
+        </exclude>
+      </filter>
+      <filter kubernetes.**>
+        @type grep
+        <exclude>
+          key $.kubernetes.labels.release
+          pattern /(^scheduler-platform-*)/
+        </exclude>
+      </filter>
+      <filter kubernetes.**>
+        @type grep
+        <exclude>
+          key $.kubernetes.namespace_name
+          pattern /(^purple)/
+        </exclude>
+      </filter>
+
+      <match kubernetes.**>
+        @type record_reformer
+        enable_ruby true
+        <record>
+          severity ${record['severity'] || if record['stream'] == 'stderr' then 'ERROR' else 'INFO' end}
+          index_name log-${record['kubernetes']['labels']['blibli_com/log-index-name'] || record['kubernetes']['labels']['app'] || record['kubernetes']['labels']['app_kubernetes_io/instance'] || record['kubernetes']['labels']['k8s-app'] || 'undefined'}-${Time.now.strftime('%Y.%m.%d')}
+        </record>
+        tag ${if record['stream'] == 'stderr' then 'stderr' else 'stdout' end}
+        remove_keys stream
+      </match>
+
+      <filter **>
+        @type insert_id
+        insert_id_key insertId 
+      </filter>
+
+      <match **>
+        @type relabel
+        @label @DISPATCH
+      </match>
+    </label>
+
+  03_dispatch.conf: |-
+    <label @DISPATCH>
+      <filter **>
+        @type prometheus
+        <metric>
+          name fluentd_input_status_num_records_total
+          type counter
+          desc The total number of incoming records
+          <labels>
+            tag ${tag}
+            hostname ${hostname}
+          </labels>
+        </metric>
+      </filter>
+
+      <match **>
+        @type relabel
+        @label @OUTPUT
+      </match>
+    </label>
+
+  04_outputs.conf: |-
+    <label @OUTPUT>
+      <match **>
+        @type opensearch
+        host "XXXXXXXXXXXXX"
+        port 9200
+        scheme https
+        ssl_verify false
+        user fluentbit
+        password XXXXXX
+        include_timestamp true
+        index_name ${index_name}
+        request_timeout 200s
+        reload_on_failure true
+        reconnect_on_error true
+        suppress_type_name true
+
+        <buffer index_name>
+          @type file
+          path /var/log/gdn-opesearch/myapp.*.buffer
+          chunk_limit_size 8MB
+          total_limit_size 1G
+          flush_interval 10
+          flush_thread_count 4
+          overflow_action block
+          retry_forever true
+          retry_max_interval 30
+          timekey 3600
+          timekey_wait 5m
+          timekey_zone Asia/Jakarta
+        </buffer>
+
+        <store>
+          @type prometheus
+          <metric>
+            name fluentd_output_status_num_records_total
+            type counter
+            desc The total number of outgoing records
+            <labels>
+              tag ${tag}
+              hostname ${hostname}
+            </labels>
+          </metric>
+        </store>
+      </match>
+    </label>
